@@ -1,0 +1,11 @@
+__MACOSX
+.DS_Store
+*.code-workspace
+.vscode
+node_modules/
+.history
+vendor/
+.idea
+.cursorrules
+.cursor
+**/__pycache__/
