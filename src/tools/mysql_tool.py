@@ -24,7 +24,7 @@ def register_mysql_tool(mcp: FastMCP):
     logger.debug("注册MySQL查询工具...")
     
     @mcp.tool()
-    def mysql_query(query: str, params: Optional[Dict[str, Any]] = None) -> str:
+    async def mysql_query(query: str, params: Optional[Dict[str, Any]] = None) -> str:
         """
         执行MySQL查询并返回结果
         
@@ -39,7 +39,14 @@ def register_mysql_tool(mcp: FastMCP):
         
         try:
             with get_db_connection() as connection:
-                results = execute_query(connection, query, params)
+                results = await execute_query(connection, query, params)
+                
+                # 检查是否是修改操作返回的影响行数
+                operation = query.strip().split()[0].upper()
+                if operation in {'UPDATE', 'DELETE', 'INSERT'} and results and 'affected_rows' in results[0]:
+                    affected_rows = results[0]['affected_rows']
+                    logger.info(f"{operation}操作影响了{affected_rows}行数据")
+                    
                 return json.dumps(results, default=str)
                 
         except Exception as e:

@@ -9,3 +9,9 @@ vendor/
 .cursorrules
 .cursor
 **/__pycache__/
+tests/
+.env
+.coverage
+docs/
+.pytest_cache/
+requirements-dev.txt

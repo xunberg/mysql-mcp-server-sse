@@ -2,6 +2,11 @@ from mcp.server.fastmcp import FastMCP
 import os
 import logging
 from dotenv import load_dotenv
+
+# 加载环境变量 - 移到最前面确保所有模块导入前环境变量已加载
+load_dotenv()
+
+# 导入自定义模块 - 确保在load_dotenv之后导入
 from src.tools.mysql_tool import register_mysql_tool
 
 # 配置日志
@@ -10,6 +15,10 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger("mysql_server")
+
+# 记录环境变量加载情况
+logger.debug("已加载环境变量")
+logger.debug(f"当前允许的风险等级: {os.getenv('ALLOWED_RISK_LEVELS', '未设置')}")
 
 # 尝试导入MySQL连接器
 try:
@@ -20,10 +29,6 @@ except ImportError as e:
     logger.critical(f"无法导入MySQL连接器: {str(e)}")
     logger.critical("请确保已安装mysql-connector-python包: pip install mysql-connector-python")
     mysql_available = False
-
-# 加载环境变量
-load_dotenv()
-logger.debug("已加载环境变量")
 
 # 从环境变量获取服务器配置
 host = os.getenv('HOST', '127.0.0.1')
