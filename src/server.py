@@ -8,6 +8,9 @@ load_dotenv()
 
 # 导入自定义模块 - 确保在load_dotenv之后导入
 from src.tools.mysql_tool import register_mysql_tool
+from src.tools.mysql_metadata_tool import register_metadata_tools
+from src.tools.mysql_info_tool import register_info_tools
+from src.tools.mysql_schema_tool import register_schema_tools
 
 # 配置日志
 logging.basicConfig(
@@ -19,6 +22,8 @@ logger = logging.getLogger("mysql_server")
 # 记录环境变量加载情况
 logger.debug("已加载环境变量")
 logger.debug(f"当前允许的风险等级: {os.getenv('ALLOWED_RISK_LEVELS', '未设置')}")
+logger.debug(f"当前环境类型: {os.getenv('ENV_TYPE', 'development')}")
+logger.debug(f"是否允许敏感信息查询: {os.getenv('ALLOW_SENSITIVE_INFO', 'false')}")
 
 # 尝试导入MySQL连接器
 try:
@@ -40,8 +45,20 @@ logger.debug("正在创建MCP服务器实例...")
 mcp = FastMCP("MySQL Query Server", "cccccccccc", host=host, port=port, debug=True, endpoint='/sse')
 logger.debug("MCP服务器实例创建完成")
 
-# 注册MySQL工具
+# 注册MySQL基础查询工具
 register_mysql_tool(mcp)
+
+# 注册MySQL元数据查询工具
+register_metadata_tools(mcp)
+logger.debug("已注册元数据查询工具")
+
+# 注册MySQL数据库信息查询工具
+register_info_tools(mcp)
+logger.debug("已注册数据库信息查询工具")
+
+# 注册MySQL表结构高级查询工具
+register_schema_tools(mcp)
+logger.debug("已注册表结构高级查询工具")
 
 def start_server():
     """启动SSE服务器的同步包装器"""

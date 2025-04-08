@@ -16,11 +16,45 @@
   - 危险操作拦截
   - WHERE子句强制检查
   - 自动返回修改操作影响的行数
+- 敏感信息保护机制
+- 自动对元数据查询结果进行格式化和增强
+
+## API接口功能
+
+系统提供以下四大类工具：
+
+### 基础查询工具
+
+- `mysql_query`: 执行任意SQL查询，支持参数化查询
+
+### 元数据查询工具
+
+- `mysql_show_tables`: 获取数据库中的表列表，支持模式匹配和限制结果数量
+- `mysql_show_columns`: 获取表的列信息
+- `mysql_describe_table`: 描述表结构
+- `mysql_show_create_table`: 获取表的创建语句
+
+### 数据库信息查询工具
+
+- `mysql_show_databases`: 获取所有数据库列表，支持过滤系统数据库
+- `mysql_show_variables`: 获取MySQL服务器变量
+- `mysql_show_status`: 获取MySQL服务器状态信息
+
+### 表结构高级查询工具
+
+- `mysql_show_indexes`: 获取表的索引信息
+- `mysql_show_table_status`: 获取表状态信息
+- `mysql_show_foreign_keys`: 获取表的外键约束信息
+- `mysql_paginate_results`: 提供结果分页功能
 
 ## 系统要求
 
 - Python 3.6+
 - MySQL服务器
+- 依赖包：
+  - mysql-connector-python
+  - python-dotenv
+  - mcp (FastMCP框架)
 
 ## 安装步骤
 
@@ -57,34 +91,33 @@ pip install -r requirements.txt
 - `ALLOWED_RISK_LEVELS`: 允许的风险等级（LOW/MEDIUM/HIGH/CRITICAL）
 - `BLOCKED_PATTERNS`: 禁止的SQL模式（正则表达式，用逗号分隔）
 - `ENABLE_QUERY_CHECK`: 是否启用SQL安全检查（true/false）
+- `ALLOW_SENSITIVE_INFO`: 是否允许查询敏感信息（true/false）
+- `SENSITIVE_INFO_FIELDS`: 自定义敏感字段模式列表（逗号分隔）
 
-## SQL安全机制
+## 安全机制详解
 
 ### 风险等级控制
-- LOW: 查询操作（SELECT）
+- LOW: 查询操作（SELECT）和元数据操作（SHOW, DESCRIBE等）
 - MEDIUM: 基本数据修改（INSERT，有WHERE的UPDATE/DELETE）
 - HIGH: 结构变更（CREATE/ALTER）和无WHERE的UPDATE
 - CRITICAL: 危险操作（DROP/TRUNCATE）和无WHERE的DELETE操作
 
-### 环境变量加载顺序
-项目使用python-dotenv加载环境变量，需要确保在导入其他模块前先加载环境变量，否则可能会导致配置未被正确应用。
+### 环境特性差异
+- 开发环境：
+  - 允许较高风险的操作
+  - 不隐藏敏感信息
+  - 提供详细的错误信息
+- 生产环境：
+  - 默认只允许LOW风险操作
+  - 严格限制数据修改
+  - 自动隐藏敏感信息
+  - 错误信息不暴露实现细节
 
-### 安全检查机制
-- 强制要求UPDATE/DELETE操作包含WHERE子句
-- SQL语句语法检查
-- 危险操作模式检测
-- 自动识别受影响的表
-- 风险等级评估
-
-### 环境特性
-- 开发环境：允许较高风险的操作，但仍需遵守基本安全规则
-- 生产环境：默认只允许LOW风险操作，严格限制数据修改
-
-### 安全拦截
-- SQL语句长度限制
-- 危险操作模式检测
-- 自动识别受影响的表
-- SQL注入防护
+### 敏感信息保护
+系统会自动检测并隐藏包含以下关键词的变量/状态值：
+- password、auth、credential、key、secret、private
+- ssl、tls、cipher、certificate
+- host、path、directory等系统路径信息
 
 ### 事务管理
 - 对于修改操作（INSERT/UPDATE/DELETE）会自动提交事务
@@ -105,17 +138,23 @@ python src/server.py
 
 ```
 .
-├── src/                    # 源代码目录
-│   ├── server.py          # 主服务器文件
-│   ├── db/                # 数据库相关代码
-│   ├── security/          # SQL安全相关代码
-│   │   ├── interceptor.py # SQL拦截器
+├── src/                     # 源代码目录
+│   ├── server.py           # 主服务器文件
+│   ├── db/                 # 数据库相关代码
+│   │   └── mysql_operations.py # MySQL操作实现
+│   ├── security/           # SQL安全相关代码
+│   │   ├── interceptor.py   # SQL拦截器
 │   │   ├── query_limiter.py # SQL安全检查器
 │   │   └── sql_analyzer.py  # SQL分析器
-│   └── tools/             # 工具类代码
-├── tests/                 # 测试代码目录
-├── .env.example           # 环境变量示例文件
-└── requirements.txt       # 项目依赖文件
+│   └── tools/              # 工具类代码
+│       ├── mysql_tool.py           # 基础查询工具
+│       ├── mysql_metadata_tool.py  # 元数据查询工具
+│       ├── mysql_info_tool.py      # 数据库信息查询工具
+│       ├── mysql_schema_tool.py    # 表结构高级查询工具
+│       └── metadata_base_tool.py   # 元数据工具基类
+├── tests/                  # 测试代码目录
+├── .env.example            # 环境变量示例文件
+└── requirements.txt        # 项目依赖文件
 ```
 
 ## 常见问题解决
@@ -135,6 +174,10 @@ python src/server.py
 - 检查操作的风险级别是否在允许的范围内
 - 如果需要执行高风险操作，相应地调整ALLOWED_RISK_LEVELS
 - 对于不带WHERE条件的UPDATE或DELETE，可以添加条件（即使是WHERE 1=1）降低风险级别
+
+### 无法查看敏感信息
+- 在开发环境中，设置ALLOW_SENSITIVE_INFO=true
+- 在生产环境中，敏感信息默认会被隐藏，这是安全特性
 
 ## 日志系统
 

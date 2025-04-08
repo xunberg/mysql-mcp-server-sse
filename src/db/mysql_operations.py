@@ -81,6 +81,7 @@ async def execute_query(connection, query: str, params: Optional[Dict[str, Any]]
         ValueError: 当查询执行失败时
     """
     cursor = None
+    operation = None  # 初始化操作类型变量
     try:
         # 安全检查
         if not await sql_interceptor.check_operation(query):
@@ -105,6 +106,33 @@ async def execute_query(connection, query: str, params: Optional[Dict[str, Any]]
             logger.debug(f"修改操作 {operation} 影响了 {affected_rows} 行数据")
             return [{'affected_rows': affected_rows}]
         
+        # 处理元数据查询操作
+        if operation in sql_analyzer.metadata_operations:
+            # 获取结果集
+            results = cursor.fetchall()
+            
+            # 没有结果时返回空列表但添加元信息
+            if not results:
+                logger.debug(f"元数据查询 {operation} 没有返回结果")
+                return [{'metadata_operation': operation, 'result_count': 0}]
+                
+            # 优化结果格式 - 为元数据结果添加额外信息
+            metadata_results = []
+            for row in results:
+                # 对某些特定元数据查询进行特殊处理
+                if operation == 'SHOW' and 'Table' in row:
+                    # SHOW TABLES 结果增强
+                    row['table_name'] = row['Table']
+                elif operation in {'DESC', 'DESCRIBE'} and 'Field' in row:
+                    # DESC/DESCRIBE 表结构结果增强
+                    row['column_name'] = row['Field']
+                    row['data_type'] = row['Type']
+                
+                metadata_results.append(row)
+                
+            logger.debug(f"元数据查询 {operation} 返回 {len(metadata_results)} 条结果")
+            return metadata_results
+        
         # 对于查询操作，返回结果集
         results = cursor.fetchall()
         logger.debug(f"查询返回 {len(results)} 条结果")
@@ -115,7 +143,7 @@ async def execute_query(connection, query: str, params: Optional[Dict[str, Any]]
         raise
     except mysql.connector.Error as query_err:
         # 如果发生错误，进行回滚
-        if operation in {'UPDATE', 'DELETE', 'INSERT'}:
+        if operation and operation in {'UPDATE', 'DELETE', 'INSERT'}:  # 确保operation已定义
             try:
                 connection.rollback()
                 logger.debug("事务已回滚")

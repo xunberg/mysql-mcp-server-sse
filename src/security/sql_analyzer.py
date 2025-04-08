@@ -38,6 +38,12 @@ class SQLOperationType:
             'SELECT', 'INSERT', 'UPDATE', 'DELETE', 'MERGE'
         }
         
+        # 添加元数据操作集合
+        self.metadata_operations = {
+            'SHOW', 'DESC', 'DESCRIBE', 'EXPLAIN', 'HELP', 
+            'ANALYZE', 'CHECK', 'CHECKSUM', 'OPTIMIZE'
+        }
+        
         # 风险等级配置
         self.allowed_risk_levels = self._parse_risk_levels()
         self.blocked_patterns = self._parse_blocked_patterns('BLOCKED_PATTERNS')
@@ -132,10 +138,16 @@ class SQLOperationType:
            - UPDATE/DELETE（有WHERE）=> MEDIUM
            - UPDATE（无WHERE）=> HIGH
            - DELETE（无WHERE）=> CRITICAL
+        4. 元数据操作：
+           - SHOW/DESC/DESCRIBE等 => LOW
         """
         # 危险操作
         if is_dangerous:
             return SQLRiskLevel.CRITICAL
+            
+        # 元数据操作
+        if operation in self.metadata_operations:
+            return SQLRiskLevel.LOW  # 元数据查询视为低风险操作
             
         # 生产环境中非SELECT操作
         if self.env_type == EnvironmentType.PRODUCTION and operation != 'SELECT':
