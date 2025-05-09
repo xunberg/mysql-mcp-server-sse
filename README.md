@@ -21,6 +21,7 @@ This project is a MySQL query server based on the MCP framework, supporting real
 - 敏感信息自动隐藏与自定义
 - 灵活的环境变量配置
 - 完善的日志与错误处理
+- Docker支持，快速部署
 
 - Built on FastMCP framework, high-performance async
 - Connection pool for high concurrency, with flexible parameter tuning
@@ -31,21 +32,59 @@ This project is a MySQL query server based on the MCP framework, supporting real
 - Automatic and customizable sensitive info masking
 - Flexible environment variable configuration
 - Robust logging & error handling
+- Docker support for quick deployment
 
 ---
 
 ## 3. 快速开始 / Quick Start
 
-### 安装依赖 / Install Dependencies
+### Docker 方式 / Docker Method
+
+```bash
+# 拉取镜像
+docker pull mangooer/mysql-mcp-server-sse:latest
+
+# 运行容器
+docker run -d \
+  --name mysql-mcp-server-sse \
+  -e HOST=0.0.0.0 \
+  -e PORT=3000 \
+  -e MYSQL_HOST=your_mysql_host \
+  -e MYSQL_PORT=3306 \
+  -e MYSQL_USER=your_mysql_user \
+  -e MYSQL_PASSWORD=your_mysql_password \
+  -e MYSQL_DATABASE=your_database \
+  -p 3000:3000 \
+  mangooer/mysql-mcp-server-sse:latest
+```
+
+Windows PowerShell 格式：
+```powershell
+docker run -d `
+  --name mysql-mcp-server-sse `
+  -e HOST=0.0.0.0 `
+  -e PORT=3000 `
+  -e MYSQL_HOST=your_mysql_host `
+  -e MYSQL_PORT=3306 `
+  -e MYSQL_USER=your_mysql_user `
+  -e MYSQL_PASSWORD=your_mysql_password `
+  -e MYSQL_DATABASE=your_database `
+  -p 3000:3000 `
+  mangooer/mysql-mcp-server-sse:latest
+```
+
+### 源码方式 / Source Code Method
+
+#### 安装依赖 / Install Dependencies
 ```bash
 pip install -r requirements.txt
 ```
 
-### 配置环境变量 / Configure Environment Variables
+#### 配置环境变量 / Configure Environment Variables
 复制`.env.example`为`.env`，并根据实际情况修改。
 Copy `.env.example` to `.env` and modify as needed.
 
-### 启动服务 / Start the Server
+#### 启动服务 / Start the Server
 ```bash
 python -m src.server
 ```
