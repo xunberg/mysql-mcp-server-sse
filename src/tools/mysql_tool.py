@@ -3,16 +3,14 @@ import logging
 from typing import Any, Dict, Optional
 from mcp.server.fastmcp import FastMCP
 from src.db.mysql_operations import get_db_connection, execute_query
-import mysql.connector
+import aiomysql
+
+from .metadata_base_tool import MetadataToolBase
 
 logger = logging.getLogger("mysql_server")
 
-# 尝试导入MySQL连接器
-try:
-    mysql.connector
-    mysql_available = True
-except ImportError:
-    mysql_available = False
+# MySQL可用性检查变量，默认认为aiomysql已可用
+mysql_available = True
 
 def register_mysql_tool(mcp: FastMCP):
     """
@@ -24,6 +22,7 @@ def register_mysql_tool(mcp: FastMCP):
     logger.debug("注册MySQL查询工具...")
     
     @mcp.tool()
+    @MetadataToolBase.handle_query_error
     async def mysql_query(query: str, params: Optional[Dict[str, Any]] = None) -> str:
         """
         执行MySQL查询并返回结果
@@ -37,18 +36,22 @@ def register_mysql_tool(mcp: FastMCP):
         """
         logger.debug(f"执行MySQL查询: {query}, 参数: {params}")
         
-        try:
-            with get_db_connection() as connection:
-                results = await execute_query(connection, query, params)
+        async with get_db_connection() as connection:
+            results = await execute_query(connection, query, params)
+            
+            # 检查是否是修改操作返回的影响行数
+            operation = query.strip().split()[0].upper()
+            if operation in {'UPDATE', 'DELETE', 'INSERT'} and results and 'affected_rows' in results[0]:
+                affected_rows = results[0]['affected_rows']
+                logger.info(f"{operation}操作影响了{affected_rows}行数据")
                 
-                # 检查是否是修改操作返回的影响行数
-                operation = query.strip().split()[0].upper()
-                if operation in {'UPDATE', 'DELETE', 'INSERT'} and results and 'affected_rows' in results[0]:
-                    affected_rows = results[0]['affected_rows']
-                    logger.info(f"{operation}操作影响了{affected_rows}行数据")
-                    
-                return json.dumps(results, default=str)
-                
-        except Exception as e:
-            logger.error(f"执行查询时发生异常: {str(e)}")
-            return json.dumps({"error": str(e)})
+            # 添加元数据信息
+            metadata_info = {
+                "metadata_info": {
+                    "operation_type": operation,
+                    "result_count": len(results)
+                },
+                "results": results
+            }
+            
+            return json.dumps(metadata_info, default=str)

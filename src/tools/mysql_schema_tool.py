@@ -6,74 +6,21 @@ MySQL表结构高级查询工具
 import json
 import logging
 import re
-import os
 from typing import Any, Dict, List, Optional, Union
 from mcp.server.fastmcp import FastMCP
 
 from .metadata_base_tool import MetadataToolBase, ParameterValidationError, QueryExecutionError
 from src.db.mysql_operations import get_db_connection, execute_query
+from src.validators import SQLValidators
 
 logger = logging.getLogger("mysql_server")
-
-# 参数验证函数
-def validate_table_name(name: str) -> bool:
-    """
-    验证表名是否合法安全
-    
-    Args:
-        name: 要验证的表名
-        
-    Returns:
-        如果表名安全返回True，否则抛出ValueError
-    
-    Raises:
-        ValueError: 当表名包含不安全字符时
-    """
-    # 仅允许字母、数字和下划线
-    if not re.match(r'^[a-zA-Z0-9_]+$', name):
-        raise ValueError(f"无效的表名: {name}, 表名只能包含字母、数字和下划线")
-    return True
-
-def validate_database_name(name: str) -> bool:
-    """
-    验证数据库名是否合法安全
-    
-    Args:
-        name: 要验证的数据库名
-        
-    Returns:
-        如果数据库名安全返回True，否则抛出ValueError
-    
-    Raises:
-        ValueError: 当数据库名包含不安全字符时
-    """
-    # 仅允许字母、数字和下划线
-    if not re.match(r'^[a-zA-Z0-9_]+$', name):
-        raise ValueError(f"无效的数据库名: {name}, 数据库名只能包含字母、数字和下划线")
-    return True
-
-def validate_column_name(name: str) -> bool:
-    """
-    验证列名是否合法安全
-    
-    Args:
-        name: 要验证的列名
-        
-    Returns:
-        如果列名安全返回True，否则抛出ValueError
-    
-    Raises:
-        ValueError: 当列名包含不安全字符时
-    """
-    # 仅允许字母、数字和下划线
-    if not re.match(r'^[a-zA-Z0-9_]+$', name):
-        raise ValueError(f"无效的列名: {name}, 列名只能包含字母、数字和下划线")
-    return True
 
 async def execute_schema_query(
     query: str, 
     params: Optional[Dict[str, Any]] = None, 
-    operation_type: str = "元数据查询"
+    operation_type: str = "元数据查询",
+    stream_results: bool = False,
+    batch_size: int = 1000
 ) -> str:
     """
     执行表结构查询
@@ -82,12 +29,20 @@ async def execute_schema_query(
         query: SQL查询语句
         params: 查询参数 (可选)
         operation_type: 操作类型描述
+        stream_results: 是否使用流式处理获取大型结果集
+        batch_size: 批处理大小，分批获取结果时的每批记录数量
         
     Returns:
         查询结果的JSON字符串
     """
-    with get_db_connection() as connection:
-        results = await execute_query(connection, query, params)
+    async with get_db_connection() as connection:
+        results = await execute_query(
+            connection, 
+            query, 
+            params, 
+            batch_size=batch_size, 
+            stream_results=stream_results
+        )
         return MetadataToolBase.format_results(results, operation_type)
 
 def register_schema_tools(mcp: FastMCP):
@@ -113,10 +68,18 @@ def register_schema_tools(mcp: FastMCP):
             表索引信息的JSON字符串
         """
         # 参数验证
-        validate_table_name(table)
+        MetadataToolBase.validate_parameter(
+            "table", table,
+            SQLValidators.validate_table_name,
+            "表名只能包含字母、数字和下划线"
+        )
         
         if database:
-            validate_database_name(database)
+            MetadataToolBase.validate_parameter(
+                "database", database,
+                SQLValidators.validate_database_name,
+                "数据库名称只能包含字母、数字和下划线"
+            )
         
         # 构建查询
         table_ref = f"`{table}`" if not database else f"`{database}`.`{table}`"
@@ -141,10 +104,18 @@ def register_schema_tools(mcp: FastMCP):
         """
         # 参数验证
         if database:
-            validate_database_name(database)
+            MetadataToolBase.validate_parameter(
+                "database", database,
+                SQLValidators.validate_database_name,
+                "数据库名称只能包含字母、数字和下划线"
+            )
             
         if like_pattern:
-            validate_column_name(like_pattern)
+            MetadataToolBase.validate_parameter(
+                "like_pattern", like_pattern,
+                SQLValidators.validate_like_pattern,
+                "模式只能包含字母、数字、下划线和通配符(%_)"
+            )
         
         # 构建查询
         if database:
@@ -174,16 +145,24 @@ def register_schema_tools(mcp: FastMCP):
             表外键约束信息的JSON字符串
         """
         # 参数验证
-        validate_table_name(table)
+        MetadataToolBase.validate_parameter(
+            "table", table,
+            SQLValidators.validate_table_name,
+            "表名只能包含字母、数字和下划线"
+        )
         
         if database:
-            validate_database_name(database)
+            MetadataToolBase.validate_parameter(
+                "database", database,
+                SQLValidators.validate_database_name,
+                "数据库名称只能包含字母、数字和下划线"
+            )
         
         # 确定数据库名
         db_name = database
         if not db_name:
-            # 获取当前数据库
-            with get_db_connection() as connection:
+            # 获取当前数据库 - 使用异步上下文管理器
+            async with get_db_connection() as connection:
                 current_db_results = await execute_query(connection, "SELECT DATABASE() as db")
                 if current_db_results and 'db' in current_db_results[0]:
                     db_name = current_db_results[0]['db']
@@ -191,7 +170,7 @@ def register_schema_tools(mcp: FastMCP):
         if not db_name:
             raise ValueError("无法确定数据库名称，请明确指定database参数")
         
-        # 使用INFORMATION_SCHEMA查询外键
+        # 使用INFORMATION_SCHEMA查询外键 - 修改为使用命名参数
         query = """
         SELECT 
             CONSTRAINT_NAME, 
@@ -208,16 +187,19 @@ def register_schema_tools(mcp: FastMCP):
         ON 
             kcu.CONSTRAINT_NAME = rc.CONSTRAINT_NAME
         WHERE 
-            kcu.TABLE_SCHEMA = %s 
-            AND kcu.TABLE_NAME = %s
+            kcu.TABLE_SCHEMA = %(table_schema)s 
+            AND kcu.TABLE_NAME = %(table_name)s
             AND kcu.REFERENCED_TABLE_NAME IS NOT NULL
         """
-        params = {'TABLE_SCHEMA': db_name, 'TABLE_NAME': table}
         
-        logger.debug(f"执行查询: 获取表 {db_name}.{table} 的外键约束")
+        # 使用命名参数，键名与SQL中的占位符对应
+        params = {"table_schema": db_name, "table_name": table}
+        
+        logger.debug(f"执行外键查询: {query}")
+        logger.debug(f"参数: {params}")
         
         # 执行查询
-        return await execute_schema_query(query, params, operation_type="外键约束查询")
+        return await execute_schema_query(query, params, operation_type="表外键查询")
     
     @mcp.tool()
     @MetadataToolBase.handle_query_error
@@ -236,47 +218,62 @@ def register_schema_tools(mcp: FastMCP):
         # 参数验证
         MetadataToolBase.validate_parameter(
             "page", page,
-            lambda x: isinstance(x, int) and x > 0,
+            lambda x: SQLValidators.validate_integer(x, min_value=1),
             "页码必须是正整数"
         )
         
         MetadataToolBase.validate_parameter(
             "page_size", page_size,
-            lambda x: isinstance(x, int) and 1 <= x <= 1000,
-            "每页记录数必须在1-1000之间"
+            lambda x: SQLValidators.validate_integer(x, min_value=1, max_value=1000),
+            "每页记录数必须是正整数且不超过1000"
         )
         
-        # 检查查询语法
-        if not query.strip().upper().startswith('SELECT'):
-            raise ValueError("只支持SELECT查询的分页")
-            
-        # 计算LIMIT和OFFSET
+        # 计算偏移量
         offset = (page - 1) * page_size
         
-        # 在查询末尾添加LIMIT子句
-        paginated_query = query.strip()
-        if 'LIMIT' in paginated_query.upper():
-            raise ValueError("查询已包含LIMIT子句，请移除后重试")
+        # 分离基础查询和LIMIT/OFFSET部分
+        base_query = query.strip()
+        if re.search(r'\bLIMIT\b', base_query, re.IGNORECASE):
+            raise ValueError("查询语句已包含LIMIT子句，不能与分页功能一起使用")
             
-        paginated_query += f" LIMIT {page_size} OFFSET {offset}"
+        # 添加LIMIT和OFFSET
+        paginated_query = f"{base_query} LIMIT {page_size} OFFSET {offset}"
         
-        logger.debug(f"执行分页查询: 页码={page}, 每页记录数={page_size}")
+        logger.debug(f"执行分页查询: {paginated_query}")
+        logger.debug(f"页码: {page}, 每页记录数: {page_size}, 偏移量: {offset}")
         
-        # 获取总记录数（用于计算总页数）
-        count_query = f"SELECT COUNT(*) as total FROM ({query}) as temp_count_table"
-        
-        with get_db_connection() as connection:
-            # 执行分页查询
+        # 执行查询 - 使用异步上下文管理器
+        async with get_db_connection() as connection:
+            # 首先检查并验证查询
+            # 确认查询安全性 - 限制查询类型，只允许SELECT查询
+            if not base_query.strip().upper().startswith('SELECT'):
+                raise ValueError("只支持SELECT查询进行分页")
+                
+            # 使用普通查询获取当前页结果（不需要流式处理，因为已经有LIMIT限制）
             results = await execute_query(connection, paginated_query)
             
-            # 获取总记录数
-            count_results = await execute_query(connection, count_query)
-            total_records = count_results[0]['total'] if count_results else 0
-            
-            # 计算总页数
-            total_pages = (total_records + page_size - 1) // page_size
-            
-            # 构建分页元数据
+            # 尝试获取总记录数 - 对于大型结果集使用流式处理
+            try:
+                # 由于无法参数化子查询，我们改为构建一个只返回计数的查询
+                # 这仍有SQL注入风险，但我们已经验证查询只能是SELECT
+                count_query = f"SELECT COUNT(*) as total FROM ({base_query}) as subquery"
+                # 计数查询通常只返回一行，不需要流式处理
+                count_results = await execute_query(connection, count_query)
+                total = count_results[0]['total'] if count_results else 0
+                
+                # 根据总记录数计算是否是大型结果集
+                is_large_resultset = total > 1000
+                
+                # 提示用户结果集大小
+                if is_large_resultset:
+                    logger.info(f"检测到大型结果集，共 {total} 条记录，建议使用较小的 page_size 值")
+                
+            except Exception as e:
+                logger.warning(f"无法执行总数查询: {str(e)}")
+                total = None
+                is_large_resultset = False
+                
+            # 构造分页元数据
             pagination_info = {
                 "metadata_info": {
                     "operation_type": "分页查询",
@@ -284,8 +281,11 @@ def register_schema_tools(mcp: FastMCP):
                     "pagination": {
                         "page": page,
                         "page_size": page_size,
-                        "total_records": total_records,
-                        "total_pages": total_pages
+                        "total_records": total,
+                        "total_pages": (total + page_size - 1) // page_size if total else None,
+                        "has_next": (page * page_size < total) if total is not None else len(results) == page_size,
+                        "has_previous": page > 1,
+                        "is_large_resultset": is_large_resultset if total is not None else None
                     }
                 },
                 "results": results

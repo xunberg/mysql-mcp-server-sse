@@ -5,12 +5,12 @@ MySQL元数据工具基类
 
 import json
 import logging
-from typing import Any, Dict, List, Optional, Union, TypeVar, Generic, Callable
+from typing import Any, Dict, List, Optional, Union, Callable
 import functools
 
 from src.db.mysql_operations import get_db_connection, execute_query
+from src.validators import SQLValidators, ValidationError
 
-T = TypeVar('T')
 logger = logging.getLogger("mysql_server")
 
 class MySQLToolError(Exception):
@@ -50,8 +50,10 @@ class MetadataToolBase:
         Raises:
             ParameterValidationError: 当参数验证失败时
         """
-        if param_value is not None and not validator(param_value):
-            raise ParameterValidationError(f"{param_name} - {error_message}")
+        try:
+            SQLValidators.validate_parameter(param_name, param_value, validator, "参数验证")
+        except ValidationError as e:
+            raise ParameterValidationError(str(e))
     
     @staticmethod
     def format_results(results: List[Dict[str, Any]], operation_type: str = "元数据查询") -> str:
@@ -91,13 +93,22 @@ class MetadataToolBase:
                 return await func(*args, **kwargs)
             except ParameterValidationError as e:
                 logger.error(f"参数验证错误: {str(e)}")
-                return json.dumps({"error": f"参数错误: {str(e)}"})
+                return json.dumps({
+                    "error": f"参数错误: {str(e)}",
+                    "error_type": "ParameterValidationError"
+                })
             except QueryExecutionError as e:
                 logger.error(f"查询执行错误: {str(e)}")
-                return json.dumps({"error": f"查询执行失败: {str(e)}"})
+                return json.dumps({
+                    "error": f"查询执行失败: {str(e)}",
+                    "error_type": "QueryExecutionError"
+                })
             except Exception as e:
                 logger.error(f"未预期的错误: {str(e)}")
-                return json.dumps({"error": f"操作失败: {str(e)}"})
+                return json.dumps({
+                    "error": f"操作失败: {str(e)}",
+                    "error_type": "UnexpectedError"
+                })
         return wrapper
         
     @staticmethod
@@ -115,9 +126,9 @@ class MetadataToolBase:
             查询结果的JSON字符串
         """
         try:
-            with get_db_connection() as connection:
+            async with get_db_connection() as connection:
                 results = await execute_query(connection, query, params)
                 return MetadataToolBase.format_results(results, operation_type)
         except Exception as e:
             logger.error(f"元数据查询执行失败: {str(e)}")
-            raise QueryExecutionError(str(e)) 
+            raise QueryExecutionError(str(e)) from e  # 保留原始异常链 

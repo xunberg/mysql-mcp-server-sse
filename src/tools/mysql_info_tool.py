@@ -13,6 +13,7 @@ from mcp.server.fastmcp import FastMCP
 from .metadata_base_tool import MetadataToolBase, ParameterValidationError, QueryExecutionError
 from src.security.sql_analyzer import EnvironmentType
 from src.db.mysql_operations import get_db_connection, execute_query
+from src.validators import SQLValidators
 
 logger = logging.getLogger("mysql_server")
 
@@ -45,6 +46,10 @@ SENSITIVE_VARIABLE_PREFIXES = [
     "password", "auth", "secret", "key", "certificate", "ssl", "tls", "cipher", 
     "authentication", "secure", "credential", "token"
 ]
+
+# 变量名和值字段映射
+VARIABLE_NAME_FIELDS = ['Variable_name', 'variable_name', 'name', 'Name', 'key', 'Key', 'Setting']
+VALUE_FIELDS = ['Value', 'value', 'variable_value', 'val', 'setting', 'Setting_Value']
 
 def check_environment_permission(env_type: EnvironmentType, query_type: str) -> bool:
     """
@@ -92,19 +97,27 @@ def filter_sensitive_info(results: List[Dict[str, Any]], filter_patterns: List[s
         # 复制一份，避免修改原始数据
         filtered_item = item.copy()
         
-        # 检查常见的变量名字段
-        for field in ['Variable_name', 'variable_name', 'name']:
+        # 确定哪个字段包含变量名
+        name_field = None
+        for field in VARIABLE_NAME_FIELDS:
             if field in filtered_item:
-                var_name = filtered_item[field].lower()
-                # 检查是否匹配敏感模式
-                is_sensitive = any(re.search(pattern, var_name, re.IGNORECASE) for pattern in filter_patterns)
+                name_field = field
+                break
                 
-                if is_sensitive:
-                    # 敏感信息，隐藏具体的值
-                    for value_field in ['Value', 'value', 'variable_value']:
-                        if value_field in filtered_item:
-                            filtered_item[value_field] = '*** HIDDEN ***'
-                            
+        # 如果找到变量名字段，检查是否敏感
+        if name_field:
+            var_name = str(filtered_item[name_field]).lower()
+            # 检查是否匹配敏感模式
+            is_sensitive = any(re.search(pattern, var_name, re.IGNORECASE) for pattern in filter_patterns)
+            
+            if is_sensitive:
+                # 找出所有可能的值字段
+                for value_field in VALUE_FIELDS:
+                    if value_field in filtered_item:
+                        # 敏感信息，隐藏具体的值
+                        filtered_item[value_field] = '*** HIDDEN ***'
+                        logger.debug(f"已隐藏敏感变量 '{var_name}' 的值")
+                        
         filtered_results.append(filtered_item)
         
     return filtered_results
@@ -136,21 +149,21 @@ def register_info_tools(mcp: FastMCP):
         if pattern:
             MetadataToolBase.validate_parameter(
                 "pattern", pattern,
-                lambda x: re.match(r'^[a-zA-Z0-9_%]+$', x),
+                SQLValidators.validate_like_pattern,
                 "模式只能包含字母、数字、下划线和通配符(%_)"
             )
         
         MetadataToolBase.validate_parameter(
             "limit", limit,
-            lambda x: isinstance(x, int) and x >= 0,
+            lambda x: SQLValidators.validate_integer(x, min_value=0),
             "返回结果的最大数量必须是非负整数"
         )
         
         # 构建基础查询
         query = "SHOW DATABASES"
         
-        # 执行查询
-        with get_db_connection() as connection:
+        # 执行查询 - 使用异步上下文管理器，不要求预先指定数据库
+        async with get_db_connection(require_database=False) as connection:
             # 先获取所有数据库
             results = await execute_query(connection, query)
             
@@ -227,7 +240,7 @@ def register_info_tools(mcp: FastMCP):
         if pattern:
             MetadataToolBase.validate_parameter(
                 "pattern", pattern,
-                lambda x: re.match(r'^[a-zA-Z0-9_%]+$', x),
+                SQLValidators.validate_like_pattern,
                 "变量模式只能包含字母、数字、下划线和通配符(%_)"
             )
             
@@ -239,7 +252,7 @@ def register_info_tools(mcp: FastMCP):
             
         logger.debug(f"执行查询: {query}")
         
-        with get_db_connection() as connection:
+        async with get_db_connection() as connection:
             results = await execute_query(connection, query)
             
             # 生产环境中过滤敏感信息
@@ -273,7 +286,7 @@ def register_info_tools(mcp: FastMCP):
         if pattern:
             MetadataToolBase.validate_parameter(
                 "pattern", pattern,
-                lambda x: re.match(r'^[a-zA-Z0-9_%]+$', x),
+                SQLValidators.validate_like_pattern,
                 "状态模式只能包含字母、数字、下划线和通配符(%_)"
             )
             
@@ -285,48 +298,11 @@ def register_info_tools(mcp: FastMCP):
             
         logger.debug(f"执行查询: {query}")
         
-        with get_db_connection() as connection:
+        async with get_db_connection() as connection:
             results = await execute_query(connection, query)
             
             # 生产环境中过滤敏感信息
             if env_type == EnvironmentType.PRODUCTION:
                 results = filter_sensitive_info(results)
                 
-            return MetadataToolBase.format_results(results, operation_type="服务器状态查询")
-
-# 工具函数: 用于参数验证
-def validate_pattern(pattern: str) -> bool:
-    """
-    验证模式字符串是否安全 (防止SQL注入)
-    
-    Args:
-        pattern: 要验证的模式字符串
-        
-    Returns:
-        如果模式安全返回True，否则抛出ValueError
-    
-    Raises:
-        ValueError: 当模式包含不安全字符时
-    """
-    # 仅允许字母、数字、下划线和通配符(% 和 _)
-    if not re.match(r'^[a-zA-Z0-9_%]+$', pattern):
-        raise ValueError("模式只能包含字母、数字、下划线和通配符(%_)")
-    return True
-
-def validate_engine_name(name: str) -> bool:
-    """
-    验证存储引擎名称是否合法安全
-    
-    Args:
-        name: 要验证的引擎名称
-        
-    Returns:
-        如果引擎名称安全返回True，否则抛出ValueError
-    
-    Raises:
-        ValueError: 当引擎名称包含不安全字符时
-    """
-    # 仅允许字母、数字和下划线
-    if not re.match(r'^[a-zA-Z0-9_]+$', name):
-        raise ValueError(f"无效的引擎名称: {name}, 引擎名称只能包含字母、数字和下划线")
-    return True 
+            return MetadataToolBase.format_results(results, operation_type="服务器状态查询") 

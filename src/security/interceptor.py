@@ -1,8 +1,9 @@
 import logging
-import os
 from typing import List, Dict
 
+from ..config import SecurityConfig, SQLConfig
 from .sql_analyzer import SQLOperationType, SQLRiskLevel
+from .sql_parser import SQLParser
 
 logger = logging.getLogger(__name__)
 
@@ -15,8 +16,8 @@ class SQLInterceptor:
     
     def __init__(self, analyzer: SQLOperationType):
         self.analyzer = analyzer
-        # 设置最大SQL长度限制（默认1000个字符）
-        self.max_sql_length = 1000
+        # 设置最大SQL长度限制
+        self.max_sql_length = SecurityConfig.MAX_SQL_LENGTH
 
     async def check_operation(self, sql_query: str) -> bool:
         """
@@ -40,19 +41,16 @@ class SQLInterceptor:
             if len(sql_query) > self.max_sql_length:
                 raise SecurityException(f"SQL语句长度({len(sql_query)})超出限制({self.max_sql_length})")
                 
+            # 使用SQLParser解析SQL
+            parsed_sql = SQLParser.parse_query(sql_query)
+            
             # 检查SQL是否有效
-            sql_parts = sql_query.strip().split()
-            if not sql_parts:
+            if not parsed_sql['is_valid']:
                 raise SecurityException("SQL语句格式无效")
                 
-            operation = sql_parts[0].upper()
+            operation = parsed_sql['operation_type']
             # 更新支持的操作类型列表，包括元数据操作
-            supported_operations = {
-                'SELECT', 'INSERT', 'UPDATE', 'DELETE', 
-                'CREATE', 'ALTER', 'DROP', 'TRUNCATE', 'MERGE',
-                'SHOW', 'DESC', 'DESCRIBE', 'EXPLAIN', 'HELP', 
-                'ANALYZE', 'CHECK', 'CHECKSUM', 'OPTIMIZE'
-            }
+            supported_operations = SQLConfig.DDL_OPERATIONS | SQLConfig.DML_OPERATIONS | SQLConfig.METADATA_OPERATIONS
                 
             if operation not in supported_operations:
                 raise SecurityException(f"不支持的SQL操作: {operation}")
@@ -74,13 +72,11 @@ class SQLInterceptor:
                 )
             
             # 确定操作类型（DDL, DML 或 元数据）
-            operation_category = "元数据操作" if operation in self.analyzer.metadata_operations else (
-                "DDL操作" if operation in self.analyzer.ddl_operations else "DML操作"
-            )
+            operation_category = parsed_sql['category']
             
             # 记录详细日志
             logger.info(
-                f"SQL{operation_category}检查通过 - "
+                f"SQL{operation_category}操作检查通过 - "
                 f"操作: {risk_analysis['operation']}, "
                 f"风险等级: {risk_analysis['risk_level'].name}, "
                 f"影响表: {', '.join(risk_analysis['affected_tables'])}"
