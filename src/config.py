@@ -102,6 +102,10 @@ class SecurityConfig:
     
     # 敏感信息查询
     ALLOW_SENSITIVE_INFO = os.getenv('ALLOW_SENSITIVE_INFO', 'false').lower() in ('true', 'yes', '1')
+
+    # 允许的表名
+    ALLOWED_TABLE_NAMES_STR = os.getenv('ALLOWED_TABLE_NAMES', '')
+    ALLOWED_TABLE_NAMES = set(ALLOWED_TABLE_NAMES_STR.split(',')) if ALLOWED_TABLE_NAMES_STR else set()
     
     # 阻止的模式
     BLOCKED_PATTERNS_STR = os.getenv('BLOCKED_PATTERNS', '')

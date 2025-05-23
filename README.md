@@ -142,6 +142,7 @@ Default endpoint: http://127.0.0.1:3000/sse
 | ENV_TYPE                 | 环境类型(development/production) / Env type           | development      |
 | ALLOWED_RISK_LEVELS      | 允许的风险等级(逗号分隔) / Allowed risk levels        | LOW,MEDIUM       |
 | ALLOW_SENSITIVE_INFO     | 允许查询敏感字段 / Allow sensitive info (true/false)  | false            |
+| ALLOWED_TABLE_NAMES      | 允许查询中使用的表集合/ Allow use table list  |  (空/empty)       |
 | SENSITIVE_INFO_FIELDS    | 自定义敏感字段模式(逗号分隔) / Custom sensitive fields | (空/empty)       |
 | MAX_SQL_LENGTH           | 最大SQL语句长度 / Max SQL length                      | 5000             |
 | BLOCKED_PATTERNS         | 阻止的SQL模式(逗号分隔) / Blocked SQL patterns        | (空/empty)       |
